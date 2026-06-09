@@ -8,7 +8,7 @@ import numpy as np
 import rclpy
 from ament_index_python.packages import get_package_share_directory
 from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 from sensor_msgs.msg import Image
 
 
@@ -28,7 +28,11 @@ class YoloStreamNode(Node):
         self.declare_parameter("input_size", 320)
         self.declare_parameter("confidence_threshold", 0.35)
         self.declare_parameter("nms_threshold", 0.45)
-        self.declare_parameter("process_every_n", 3)
+        self.declare_parameter("process_every_n", 1)
+        self.declare_parameter("max_processing_fps", 2.0)
+        self.declare_parameter("output_fps", 5.0)
+        self.declare_parameter("output_reliability", "reliable")
+        self.declare_parameter("watchdog_timeout_sec", 5.0)
 
         self.input_topic = self.get_parameter("input_topic").value
         self.output_topic = self.get_parameter("output_topic").value
@@ -40,32 +44,61 @@ class YoloStreamNode(Node):
         self.confidence_threshold = float(self.get_parameter("confidence_threshold").value)
         self.nms_threshold = float(self.get_parameter("nms_threshold").value)
         self.process_every_n = max(1, int(self.get_parameter("process_every_n").value))
+        self.max_processing_fps = max(0.1, float(self.get_parameter("max_processing_fps").value))
+        self.output_fps = max(0.1, float(self.get_parameter("output_fps").value))
+        self.output_reliability = str(self.get_parameter("output_reliability").value).lower()
+        self.watchdog_timeout_sec = max(1.0, float(self.get_parameter("watchdog_timeout_sec").value))
 
         self.bridge = CvBridge()
         self.class_names = self._load_class_names(self.class_names_path)
         self.net = self._load_model(self.model_path)
         self.frame_count = 0
+        self.published_count = 0
         self.processed_count = 0
+        self.latest_msg = None
+        self.latest_frame_count = 0
+        self.last_published_frame_count = 0
+        self.last_processed_frame_count = 0
+        self.last_detections: List[Tuple[Box, float, int]] = []
+        self.last_input_time = time.monotonic()
+        self.last_publish_time = time.monotonic()
         self.last_log_time = time.monotonic()
+        self.last_watchdog_log_time = 0.0
         self.inference_error_logged = False
 
-        self.publisher = self.create_publisher(Image, self.output_topic, qos_profile_sensor_data)
+        reliability = (
+            ReliabilityPolicy.BEST_EFFORT
+            if self.output_reliability == "best_effort"
+            else ReliabilityPolicy.RELIABLE
+        )
+        output_qos = QoSProfile(depth=1, reliability=reliability)
+        self.publisher = self.create_publisher(Image, self.output_topic, output_qos)
         self.subscription = self.create_subscription(
             Image,
             self.input_topic,
             self._on_image,
             qos_profile_sensor_data,
         )
+        self.processing_timer = self.create_timer(
+            1.0 / self.max_processing_fps,
+            self._process_latest_image,
+        )
+        self.output_timer = self.create_timer(
+            1.0 / self.output_fps,
+            self._publish_latest_image,
+        )
+        self.watchdog_timer = self.create_timer(1.0, self._watchdog)
 
         self.get_logger().info(
-            "Detection stream ready: %s -> %s, type=%s, model=%s, input_size=%d, process_every_n=%d"
+            "Detection stream ready: %s -> %s, type=%s, model=%s, output_fps=%.1f, max_processing_fps=%.1f, output_reliability=%s"
             % (
                 self.input_topic,
                 self.output_topic,
                 self.model_type,
                 self.model_path,
-                self.input_size,
-                self.process_every_n,
+                self.output_fps,
+                self.max_processing_fps,
+                self.output_reliability,
             )
         )
 
@@ -98,35 +131,84 @@ class YoloStreamNode(Node):
 
     def _on_image(self, msg: Image) -> None:
         self.frame_count += 1
-        if self.frame_count % self.process_every_n != 0:
+        self.latest_msg = msg
+        self.latest_frame_count = self.frame_count
+        self.last_input_time = time.monotonic()
+
+    def _publish_latest_image(self) -> None:
+        msg = self.latest_msg
+        if msg is None:
+            return
+        if self.latest_frame_count == self.last_published_frame_count:
             return
 
-        start = time.monotonic()
-
+        self.last_published_frame_count = self.latest_frame_count
         frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
-        try:
-            detections = self._detect(frame)
-            annotated = self._draw_detections(frame, detections)
-        except cv2.error as exc:
-            detections = []
-            annotated = self._draw_error(frame, "DNN error; try input_size:=640")
-            if not self.inference_error_logged:
-                self.get_logger().error("OpenCV DNN inference failed: %s" % exc)
-                self.inference_error_logged = True
-
+        annotated = self._draw_detections(frame, self.last_detections)
         out_msg = self.bridge.cv2_to_imgmsg(annotated, encoding="bgr8")
         out_msg.header = msg.header
         self.publisher.publish(out_msg)
+        self.published_count += 1
+        self.last_publish_time = time.monotonic()
+
+    def _process_latest_image(self) -> None:
+        msg = self.latest_msg
+        if msg is None:
+            return
+        if self.latest_frame_count == self.last_processed_frame_count:
+            return
+        if self.latest_frame_count - self.last_processed_frame_count < self.process_every_n:
+            return
+
+        self.last_processed_frame_count = self.latest_frame_count
+        start = time.monotonic()
+
+        try:
+            frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
+            detections = self._detect(frame.copy())
+            self.last_detections = detections
+        except cv2.error as exc:
+            detections = []
+            if not self.inference_error_logged:
+                self.get_logger().error("OpenCV DNN inference failed: %s" % exc)
+                self.inference_error_logged = True
 
         self.processed_count += 1
         now = time.monotonic()
         if now - self.last_log_time > 10.0:
             elapsed_ms = (now - start) * 1000.0
             self.get_logger().info(
-                "Processed %d frames, last inference+publish %.1f ms, detections=%d"
-                % (self.processed_count, elapsed_ms, len(detections))
+                "Received %d frames, published %d, processed %d, last inference %.1f ms, detections=%d"
+                % (
+                    self.frame_count,
+                    self.published_count,
+                    self.processed_count,
+                    elapsed_ms,
+                    len(detections),
+                )
             )
             self.last_log_time = now
+
+    def _watchdog(self) -> None:
+        now = time.monotonic()
+        no_input_for = now - self.last_input_time
+        no_publish_for = now - self.last_publish_time
+        if no_input_for < self.watchdog_timeout_sec and no_publish_for < self.watchdog_timeout_sec:
+            return
+        if now - self.last_watchdog_log_time < self.watchdog_timeout_sec:
+            return
+
+        self.get_logger().warn(
+            "Watchdog: no input for %.1fs, no output for %.1fs, received=%d, published=%d, processed=%d"
+            % (
+                no_input_for,
+                no_publish_for,
+                self.frame_count,
+                self.published_count,
+                self.processed_count,
+            )
+        )
+        self.last_watchdog_log_time = now
 
     def _detect(self, frame: np.ndarray) -> List[Tuple[Box, float, int]]:
         if self.model_type == "ssd":

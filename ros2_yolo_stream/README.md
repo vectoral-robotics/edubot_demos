@@ -50,16 +50,18 @@ The output can be shown through the video server or RViz as a normal
 
 ## Raspberry Pi Tuning
 
-Use a smaller inference size and skip frames if CPU load is high:
+Limit the processing rate and skip frames if CPU load is high:
 
 ```bash
 ros2 launch ros2_yolo_stream yolo_stream.launch.py \
   input_topic:=/image \
   output_topic:=/yolo/image \
-  input_size:=320 \
-  process_every_n:=3 \
+  output_fps:=5.0 \
+  max_processing_fps:=2.0 \
+  process_every_n:=1 \
+  output_reliability:=reliable \
   confidence_threshold:=0.35
 ```
 
-Lower `input_size` improves speed but reduces accuracy. Increase
-`process_every_n` to reduce CPU usage.
+Lower `output_fps` and `max_processing_fps` or increase `process_every_n` to
+reduce CPU usage.
