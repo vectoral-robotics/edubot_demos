@@ -1,11 +1,10 @@
 # ROS 2 YOLO Stream Demo
 
-This demo subscribes to a ROS camera image, runs lightweight YOLO object
-detection with OpenCV DNN, and publishes an annotated image stream.
+This demo subscribes to a ROS camera image, runs lightweight object detection
+with OpenCV DNN, and publishes an annotated image stream.
 
-It avoids PyTorch at runtime. The default model is YOLOv5n exported to ONNX and
-converted to FP32 for OpenCV 4.5.x compatibility, which is a practical starting
-point for Raspberry Pi-class hardware.
+It avoids PyTorch at runtime. The default model is MobileNet SSD because it is
+small and works with the OpenCV 4.5.x version shipped with ROS Humble images.
 
 ## Build In The Workspace
 
@@ -23,13 +22,14 @@ source install/setup.bash
 ## Download The Model
 
 ```bash
-/workspace/src/ros2_yolo_stream/scripts/download_yolov5n_onnx.sh
+/workspace/src/ros2_yolo_stream/scripts/download_mobilenet_ssd.sh
 ```
 
 This stores the model at:
 
 ```text
-/workspace/models/yolov5n_fp32.onnx
+/workspace/models/mobilenet_iter_73000.caffemodel
+/workspace/models/mobilenet_ssd.prototxt
 ```
 
 ## Run

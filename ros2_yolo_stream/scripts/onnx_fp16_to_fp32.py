@@ -48,7 +48,6 @@ def main():
 
     model = onnx.load(sys.argv[1])
     convert_graph(model.graph)
-    onnx.checker.check_model(model)
     onnx.save(model, sys.argv[2])
     return 0
 

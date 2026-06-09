@@ -21,7 +21,9 @@ class YoloStreamNode(Node):
 
         self.declare_parameter("input_topic", "/image")
         self.declare_parameter("output_topic", "/yolo/image")
-        self.declare_parameter("model_path", "/workspace/models/yolov5n_fp32.onnx")
+        self.declare_parameter("model_type", "ssd")
+        self.declare_parameter("model_path", "/workspace/models/mobilenet_iter_73000.caffemodel")
+        self.declare_parameter("config_path", "/workspace/models/mobilenet_ssd.prototxt")
         self.declare_parameter("class_names_path", self._default_class_names_path())
         self.declare_parameter("input_size", 320)
         self.declare_parameter("confidence_threshold", 0.35)
@@ -30,7 +32,9 @@ class YoloStreamNode(Node):
 
         self.input_topic = self.get_parameter("input_topic").value
         self.output_topic = self.get_parameter("output_topic").value
+        self.model_type = str(self.get_parameter("model_type").value).lower()
         self.model_path = self.get_parameter("model_path").value
+        self.config_path = self.get_parameter("config_path").value
         self.class_names_path = self.get_parameter("class_names_path").value
         self.input_size = int(self.get_parameter("input_size").value)
         self.confidence_threshold = float(self.get_parameter("confidence_threshold").value)
@@ -54,10 +58,11 @@ class YoloStreamNode(Node):
         )
 
         self.get_logger().info(
-            "YOLO stream ready: %s -> %s, model=%s, input_size=%d, process_every_n=%d"
+            "Detection stream ready: %s -> %s, type=%s, model=%s, input_size=%d, process_every_n=%d"
             % (
                 self.input_topic,
                 self.output_topic,
+                self.model_type,
                 self.model_path,
                 self.input_size,
                 self.process_every_n,
@@ -66,7 +71,7 @@ class YoloStreamNode(Node):
 
     def _default_class_names_path(self) -> str:
         share_dir = get_package_share_directory("ros2_yolo_stream")
-        return os.path.join(share_dir, "config", "coco.names")
+        return os.path.join(share_dir, "config", "voc.names")
 
     def _load_class_names(self, path: str) -> List[str]:
         with open(path, "r", encoding="utf-8") as names_file:
@@ -75,10 +80,18 @@ class YoloStreamNode(Node):
     def _load_model(self, path: str):
         if not os.path.exists(path):
             raise FileNotFoundError(
-                "YOLO model not found at %s. Run scripts/download_yolov5n_onnx.sh first." % path
+                "Detection model not found at %s. Run the matching download script first." % path
             )
 
-        net = cv2.dnn.readNetFromONNX(path)
+        if self.model_type == "ssd":
+            if not os.path.exists(self.config_path):
+                raise FileNotFoundError(
+                    "SSD config not found at %s. Run scripts/download_mobilenet_ssd.sh first."
+                    % self.config_path
+                )
+            net = cv2.dnn.readNetFromCaffe(self.config_path, path)
+        else:
+            net = cv2.dnn.readNetFromONNX(path)
         net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
         net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
         return net
@@ -116,6 +129,40 @@ class YoloStreamNode(Node):
             self.last_log_time = now
 
     def _detect(self, frame: np.ndarray) -> List[Tuple[Box, float, int]]:
+        if self.model_type == "ssd":
+            return self._detect_ssd(frame)
+        return self._detect_yolo(frame)
+
+    def _detect_ssd(self, frame: np.ndarray) -> List[Tuple[Box, float, int]]:
+        height, width = frame.shape[:2]
+        blob = cv2.dnn.blobFromImage(
+            frame,
+            scalefactor=0.007843,
+            size=(300, 300),
+            mean=(127.5, 127.5, 127.5),
+            swapRB=False,
+            crop=False,
+        )
+
+        self.net.setInput(blob)
+        output = self.net.forward()
+
+        detections: List[Tuple[Box, float, int]] = []
+        for index in range(output.shape[2]):
+            confidence = float(output[0, 0, index, 2])
+            if confidence < self.confidence_threshold:
+                continue
+
+            class_id = int(output[0, 0, index, 1])
+            x1 = max(0, min(width - 1, int(output[0, 0, index, 3] * width)))
+            y1 = max(0, min(height - 1, int(output[0, 0, index, 4] * height)))
+            x2 = max(0, min(width - 1, int(output[0, 0, index, 5] * width)))
+            y2 = max(0, min(height - 1, int(output[0, 0, index, 6] * height)))
+            detections.append(((x1, y1, max(1, x2 - x1), max(1, y2 - y1)), confidence, class_id))
+
+        return detections
+
+    def _detect_yolo(self, frame: np.ndarray) -> List[Tuple[Box, float, int]]:
         input_image, scale, pad_x, pad_y = self._letterbox(frame, self.input_size)
         blob = cv2.dnn.blobFromImage(
             input_image,
