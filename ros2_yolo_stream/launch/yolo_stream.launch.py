@@ -9,7 +9,7 @@ def generate_launch_description():
         [
             DeclareLaunchArgument("input_topic", default_value="/image"),
             DeclareLaunchArgument("output_topic", default_value="/yolo/image"),
-            DeclareLaunchArgument("model_path", default_value="/workspace/models/yolov5n.onnx"),
+            DeclareLaunchArgument("model_path", default_value="/workspace/models/yolov5n_fp32.onnx"),
             DeclareLaunchArgument("input_size", default_value="320"),
             DeclareLaunchArgument("confidence_threshold", default_value="0.35"),
             DeclareLaunchArgument("nms_threshold", default_value="0.45"),

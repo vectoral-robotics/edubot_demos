@@ -21,7 +21,7 @@ class YoloStreamNode(Node):
 
         self.declare_parameter("input_topic", "/image")
         self.declare_parameter("output_topic", "/yolo/image")
-        self.declare_parameter("model_path", "/workspace/models/yolov5n.onnx")
+        self.declare_parameter("model_path", "/workspace/models/yolov5n_fp32.onnx")
         self.declare_parameter("class_names_path", self._default_class_names_path())
         self.declare_parameter("input_size", 320)
         self.declare_parameter("confidence_threshold", 0.35)

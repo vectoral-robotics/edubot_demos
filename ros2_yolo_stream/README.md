@@ -3,19 +3,18 @@
 This demo subscribes to a ROS camera image, runs lightweight YOLO object
 detection with OpenCV DNN, and publishes an annotated image stream.
 
-It avoids PyTorch at runtime. The default model is YOLOv5n exported to ONNX,
-which is a practical starting point for Raspberry Pi-class hardware.
+It avoids PyTorch at runtime. The default model is YOLOv5n exported to ONNX and
+converted to FP32 for OpenCV 4.5.x compatibility, which is a practical starting
+point for Raspberry Pi-class hardware.
 
-## Install Into The Workspace
+## Build In The Workspace
 
-The Code Server container copies this demo to `/workspace/demos/ros2_yolo_stream`
+The Code Server container copies this demo to `/workspace/src/ros2_yolo_stream`
 when it starts.
 
-For ROS 2 builds, copy it into the workspace source folder:
+Build it from the workspace root:
 
 ```bash
-mkdir -p /workspace/src
-cp -a /workspace/demos/ros2_yolo_stream /workspace/src/
 cd /workspace
 colcon build --packages-select ros2_yolo_stream
 source install/setup.bash
@@ -30,7 +29,7 @@ source install/setup.bash
 This stores the model at:
 
 ```text
-/workspace/models/yolov5n.onnx
+/workspace/models/yolov5n_fp32.onnx
 ```
 
 ## Run
