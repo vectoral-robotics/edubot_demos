@@ -5,8 +5,12 @@ from typing import List, Sequence, Tuple
 import cv2
 from cv_bridge import CvBridge
 import numpy as np
+import threading
+
 import rclpy
 from ament_index_python.packages import get_package_share_directory
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
+from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, qos_profile_sensor_data
 from sensor_msgs.msg import Image
@@ -65,6 +69,12 @@ class YoloStreamNode(Node):
         self.last_log_time = time.monotonic()
         self.last_watchdog_log_time = 0.0
         self.inference_error_logged = False
+        self._processing_lock = threading.Lock()
+
+        # Separate callback groups so the subscription never gets starved
+        # by a long-running inference timer callback.
+        sub_cb_group = MutuallyExclusiveCallbackGroup()
+        timer_cb_group = MutuallyExclusiveCallbackGroup()
 
         reliability = (
             ReliabilityPolicy.BEST_EFFORT
@@ -85,16 +95,19 @@ class YoloStreamNode(Node):
             self.input_topic,
             self._on_image,
             input_qos,
+            callback_group=sub_cb_group,
         )
         self.processing_timer = self.create_timer(
             1.0 / self.max_processing_fps,
             self._process_latest_image,
+            callback_group=timer_cb_group,
         )
         self.output_timer = self.create_timer(
             1.0 / self.output_fps,
             self._publish_latest_image,
+            callback_group=timer_cb_group,
         )
-        self.watchdog_timer = self.create_timer(1.0, self._watchdog)
+        self.watchdog_timer = self.create_timer(1.0, self._watchdog, callback_group=timer_cb_group)
 
         self.get_logger().info(
             "Detection stream ready: %s -> %s, type=%s, model=%s, output_fps=%.1f, max_processing_fps=%.1f, output_reliability=%s"
@@ -159,6 +172,14 @@ class YoloStreamNode(Node):
         self.last_publish_time = time.monotonic()
 
     def _process_latest_image(self) -> None:
+        if not self._processing_lock.acquire(blocking=False):
+            return  # previous inference still running
+        try:
+            self._process_latest_image_locked()
+        finally:
+            self._processing_lock.release()
+
+    def _process_latest_image_locked(self) -> None:
         msg = self.latest_msg
         if msg is None:
             return
@@ -390,8 +411,10 @@ class YoloStreamNode(Node):
 def main(args=None) -> None:
     rclpy.init(args=args)
     node = YoloStreamNode()
+    executor = MultiThreadedExecutor(num_threads=3)
+    executor.add_node(node)
     try:
-        rclpy.spin(node)
+        executor.spin()
     finally:
         node.destroy_node()
         rclpy.shutdown()
