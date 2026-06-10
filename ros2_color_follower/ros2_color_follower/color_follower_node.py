@@ -100,6 +100,7 @@ class ColorFollowerNode(Node):
 
         # Smoothed velocities
         self._smooth_vx = 0.0
+        self._smooth_vy = 0.0
         self._smooth_wz = 0.0
 
         # Latest annotated frame
@@ -277,7 +278,7 @@ class ColorFollowerNode(Node):
         hud_color = (0, 255, 0) if tracking and self.enabled else (0, 100, 255)
         cv2.putText(frame, status, (10, 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.8, hud_color, 2, cv2.LINE_AA)
-        cv2.putText(frame, "v:%.2f w:%.2f" % (self._smooth_vx, self._smooth_wz),
+        cv2.putText(frame, "vx:%.2f vy:%.2f w:%.2f" % (self._smooth_vx, self._smooth_vy, self._smooth_wz),
                     (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1, cv2.LINE_AA)
 
         self._last_frame = frame
@@ -342,6 +343,7 @@ class ColorFollowerNode(Node):
     def _control_tick(self) -> None:
         if not self.enabled:
             self._smooth_vx = 0.0
+            self._smooth_vy = 0.0
             self._smooth_wz = 0.0
             self.cmd_pub.publish(Twist())
             return
@@ -351,13 +353,21 @@ class ColorFollowerNode(Node):
         has_target = self._target_found and age < self.lost_timeout
 
         target_vx = 0.0
+        target_vy = 0.0
         target_wz = 0.0
 
         if has_target:
             ex = self._target_error_x
-            if abs(ex) > self.dead_zone:
-                target_wz = -ex * 2.0 * self.max_angular_speed
 
+            # Omnidirectional: strafe sideways to center the ball,
+            # only rotate gently to keep the ball in view.
+            if abs(ex) > self.dead_zone:
+                # Strafe: linear.y moves the robot sideways (left/right)
+                target_vy = -ex * 2.0 * self.max_linear_speed
+                # Gentle rotation to face the ball (reduced gain)
+                target_wz = -ex * 0.8 * self.max_angular_speed
+
+            # Forward/backward: drive based on apparent ball size
             size_error = self.target_radius_ratio - self._target_radius_ratio
             if abs(size_error) > 0.02:
                 # Quadratic response: faster when ball is far, gentle when close
@@ -372,15 +382,19 @@ class ColorFollowerNode(Node):
         # Exponential smoothing
         a = self.smoothing
         self._smooth_vx = a * target_vx + (1.0 - a) * self._smooth_vx
+        self._smooth_vy = a * target_vy + (1.0 - a) * self._smooth_vy
         self._smooth_wz = a * target_wz + (1.0 - a) * self._smooth_wz
 
         if abs(self._smooth_vx) < 0.01:
             self._smooth_vx = 0.0
+        if abs(self._smooth_vy) < 0.01:
+            self._smooth_vy = 0.0
         if abs(self._smooth_wz) < 0.01:
             self._smooth_wz = 0.0
 
         twist = Twist()
         twist.linear.x = self._smooth_vx
+        twist.linear.y = self._smooth_vy
         twist.angular.z = self._smooth_wz
         self.cmd_pub.publish(twist)
 
