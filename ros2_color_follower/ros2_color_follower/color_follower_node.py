@@ -35,6 +35,7 @@ class ColorFollowerNode(Node):
         self.declare_parameter("hsv_high_s", 255)
         self.declare_parameter("hsv_high_v", 255)
         self.declare_parameter("min_area", 200)
+        self.declare_parameter("min_circularity", 0.45)
         self.declare_parameter("max_linear_speed", 0.3)
         self.declare_parameter("max_angular_speed", 1.0)
         self.declare_parameter("target_radius_ratio", 0.12)
@@ -60,6 +61,7 @@ class ColorFollowerNode(Node):
             self.get_parameter("hsv_high_v").value,
         ], dtype=np.uint8)
         self.min_area = int(self.get_parameter("min_area").value)
+        self.min_circularity = float(self.get_parameter("min_circularity").value)
         self.max_linear_speed = float(self.get_parameter("max_linear_speed").value)
         self.max_angular_speed = float(self.get_parameter("max_angular_speed").value)
         self.target_radius_ratio = float(self.get_parameter("target_radius_ratio").value)
@@ -177,18 +179,35 @@ class ColorFollowerNode(Node):
         mask = cv2.erode(mask, None, iterations=1)
         mask = cv2.dilate(mask, None, iterations=3)
 
-        # Find largest contour
+        # Find contours and pick the best ball-shaped one (color + shape)
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
         now = time.monotonic()
         found = False
 
-        if contours:
-            largest = max(contours, key=cv2.contourArea)
-            area = cv2.contourArea(largest)
+        # Score each contour by area, only accept round shapes
+        best_score = 0.0
+        best_match = None
 
-            if area >= self.min_area:
-                ((cx, cy), radius) = cv2.minEnclosingCircle(largest)
+        for cnt in contours:
+            area = cv2.contourArea(cnt)
+            if area < self.min_area:
+                continue
+            perimeter = cv2.arcLength(cnt, True)
+            if perimeter < 1.0:
+                continue
+            circularity = (4.0 * np.pi * area) / (perimeter * perimeter)
+            if circularity < self.min_circularity:
+                continue
+            # Score: prefer large + round blobs
+            score = area * circularity
+            if score > best_score:
+                best_score = score
+                best_match = cnt
+
+        if best_match is not None:
+            area = cv2.contourArea(best_match)
+            ((cx, cy), radius) = cv2.minEnclosingCircle(best_match)
                 # Scale back to full frame
                 cx_full = cx / scale
                 cy_full = cy / scale
