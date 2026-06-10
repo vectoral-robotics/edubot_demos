@@ -49,6 +49,7 @@ class ColorFollowerNode(Node):
         self.declare_parameter("control_hz", 20.0)
         self.declare_parameter("video_hz", 15.0)
         self.declare_parameter("lost_timeout_sec", 1.5)
+        self.declare_parameter("omni", False)
         self.declare_parameter("enabled", True)
 
         self.input_topic = self.get_parameter("input_topic").value
@@ -74,6 +75,7 @@ class ColorFollowerNode(Node):
         self.control_hz = max(5.0, float(self.get_parameter("control_hz").value))
         self.video_hz = max(1.0, float(self.get_parameter("video_hz").value))
         self.lost_timeout = float(self.get_parameter("lost_timeout_sec").value)
+        self.omni = bool(self.get_parameter("omni").value)
         self.enabled = bool(self.get_parameter("enabled").value)
 
         # ── Tracker state ──────────────────────────────────────────────
@@ -142,8 +144,8 @@ class ColorFollowerNode(Node):
         )
 
         self.get_logger().info(
-            "Color follower ready (hybrid HSV+CamShift): HSV [%d,%d,%d]-[%d,%d,%d]"
-            % (*self.hsv_low, *self.hsv_high)
+            "Color follower ready (hybrid HSV+CamShift): HSV [%d,%d,%d]-[%d,%d,%d], mode=%s"
+            % (*self.hsv_low, *self.hsv_high, "omni" if self.omni else "diff")
         )
 
     # ── Image callback ─────────────────────────────────────────────────
@@ -359,13 +361,15 @@ class ColorFollowerNode(Node):
         if has_target:
             ex = self._target_error_x
 
-            # Omnidirectional: strafe sideways to center the ball,
-            # only rotate gently to keep the ball in view.
-            if abs(ex) > self.dead_zone:
-                # Strafe: linear.y moves the robot sideways (left/right)
-                target_vy = -ex * 2.0 * self.max_linear_speed
-                # Gentle rotation to face the ball (reduced gain)
-                target_wz = -ex * 0.8 * self.max_angular_speed
+            if self.omni:
+                # Omnidirectional: strafe sideways + gentle rotation
+                if abs(ex) > self.dead_zone:
+                    target_vy = -ex * 2.0 * self.max_linear_speed
+                    target_wz = -ex * 0.8 * self.max_angular_speed
+            else:
+                # Differential: rotate to center the ball
+                if abs(ex) > self.dead_zone:
+                    target_wz = -ex * 2.0 * self.max_angular_speed
 
             # Forward/backward: drive based on apparent ball size
             size_error = self.target_radius_ratio - self._target_radius_ratio

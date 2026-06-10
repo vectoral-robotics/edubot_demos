@@ -26,6 +26,7 @@ def generate_launch_description():
             DeclareLaunchArgument("control_hz", default_value="20.0"),
             DeclareLaunchArgument("video_hz", default_value="15.0"),
             DeclareLaunchArgument("lost_timeout_sec", default_value="1.5"),
+            DeclareLaunchArgument("omni", default_value="false"),
             DeclareLaunchArgument("enabled", default_value="true"),
             Node(
                 package="ros2_color_follower",
@@ -53,6 +54,7 @@ def generate_launch_description():
                         "control_hz": LaunchConfiguration("control_hz"),
                         "video_hz": LaunchConfiguration("video_hz"),
                         "lost_timeout_sec": LaunchConfiguration("lost_timeout_sec"),
+                        "omni": LaunchConfiguration("omni"),
                         "enabled": LaunchConfiguration("enabled"),
                     }
                 ],
