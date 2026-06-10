@@ -28,13 +28,13 @@ class ColorFollowerNode(Node):
         self.declare_parameter("output_topic", "/follower/image")
         self.declare_parameter("cmd_vel_topic", "/cmd_vel")
         # HSV range for bright / lime green  (tune with a color picker)
-        self.declare_parameter("hsv_low_h", 35)
-        self.declare_parameter("hsv_low_s", 80)
-        self.declare_parameter("hsv_low_v", 80)
-        self.declare_parameter("hsv_high_h", 85)
+        self.declare_parameter("hsv_low_h", 25)
+        self.declare_parameter("hsv_low_s", 40)
+        self.declare_parameter("hsv_low_v", 40)
+        self.declare_parameter("hsv_high_h", 95)
         self.declare_parameter("hsv_high_s", 255)
         self.declare_parameter("hsv_high_v", 255)
-        self.declare_parameter("min_area", 500)
+        self.declare_parameter("min_area", 200)
         self.declare_parameter("max_linear_speed", 0.3)
         self.declare_parameter("max_angular_speed", 1.0)
         self.declare_parameter("target_radius_ratio", 0.12)
@@ -165,14 +165,17 @@ class ColorFollowerNode(Node):
         proc_h = int(h * scale)
         small = cv2.resize(frame, (proc_w, proc_h), interpolation=cv2.INTER_LINEAR)
 
+        # Blur to handle noise and color gradients
+        blurred = cv2.GaussianBlur(small, (11, 11), 0)
+
         # HSV filter
-        hsv = cv2.cvtColor(small, cv2.COLOR_BGR2HSV)
+        hsv = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
         mask = cv2.inRange(hsv, self.hsv_low, self.hsv_high)
 
-        # Morphology to clean noise
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
-        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
+        # Gentle morphology: small erode to kill speckles, larger dilate to
+        # connect fragmented blobs (e.g. specular highlights on the ball)
+        mask = cv2.erode(mask, None, iterations=1)
+        mask = cv2.dilate(mask, None, iterations=3)
 
         # Find largest contour
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
