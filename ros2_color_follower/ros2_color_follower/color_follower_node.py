@@ -360,8 +360,10 @@ class ColorFollowerNode(Node):
 
             size_error = self.target_radius_ratio - self._target_radius_ratio
             if abs(size_error) > 0.02:
+                # Quadratic response: faster when ball is far, gentle when close
+                sign = 1.0 if size_error > 0 else -1.0
                 target_vx = float(np.clip(
-                    size_error * 3.0 * self.max_linear_speed,
+                    sign * (size_error ** 2) * 30.0 * self.max_linear_speed + size_error * 1.5 * self.max_linear_speed,
                     -self.max_linear_speed,
                     self.max_linear_speed,
                 ))
