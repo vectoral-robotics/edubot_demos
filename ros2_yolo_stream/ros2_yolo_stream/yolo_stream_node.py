@@ -8,7 +8,7 @@ import numpy as np
 import rclpy
 from ament_index_python.packages import get_package_share_directory
 from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
+from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, qos_profile_sensor_data
 from sensor_msgs.msg import Image
 
 
@@ -73,11 +73,18 @@ class YoloStreamNode(Node):
         )
         output_qos = QoSProfile(depth=1, reliability=reliability)
         self.publisher = self.create_publisher(Image, self.output_topic, output_qos)
+        # Use RELIABLE to match cam2image's default QoS; keep only the latest
+        # frame to avoid buffering lag.
+        input_qos = QoSProfile(
+            depth=1,
+            reliability=ReliabilityPolicy.RELIABLE,
+            history=HistoryPolicy.KEEP_LAST,
+        )
         self.subscription = self.create_subscription(
             Image,
             self.input_topic,
             self._on_image,
-            qos_profile_sensor_data,
+            input_qos,
         )
         self.processing_timer = self.create_timer(
             1.0 / self.max_processing_fps,
