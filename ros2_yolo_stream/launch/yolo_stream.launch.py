@@ -10,8 +10,12 @@ def generate_launch_description():
             DeclareLaunchArgument("input_topic", default_value="/image"),
             DeclareLaunchArgument("output_topic", default_value="/yolo/image"),
             DeclareLaunchArgument("model_type", default_value="ssd"),
-            DeclareLaunchArgument("model_path", default_value="/workspace/models/mobilenet_iter_73000.caffemodel"),
-            DeclareLaunchArgument("config_path", default_value="/workspace/models/mobilenet_ssd.prototxt"),
+            DeclareLaunchArgument(
+                "model_path", default_value="/workspace/models/mobilenet_iter_73000.caffemodel"
+            ),
+            DeclareLaunchArgument(
+                "config_path", default_value="/workspace/models/mobilenet_ssd.prototxt"
+            ),
             DeclareLaunchArgument("input_size", default_value="320"),
             DeclareLaunchArgument("confidence_threshold", default_value="0.35"),
             DeclareLaunchArgument("nms_threshold", default_value="0.45"),

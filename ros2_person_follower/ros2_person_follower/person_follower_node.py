@@ -1,19 +1,18 @@
 import os
-import time
 import threading
+import time
 from typing import List, Tuple
 
 import cv2
-from cv_bridge import CvBridge
 import numpy as np
 import rclpy
+from cv_bridge import CvBridge
+from geometry_msgs.msg import Twist
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
+from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import Image
-from geometry_msgs.msg import Twist
-
 
 Box = Tuple[int, int, int, int]  # x, y, w, h
 
@@ -79,10 +78,10 @@ class PersonFollowerNode(Node):
         self._detect_lock = threading.Lock()
 
         # Shared detection result (written by detect thread, read by control)
-        self._target_error_x = 0.0   # -0.5 .. 0.5 (person center offset)
-        self._target_size_ratio = 0.0 # bbox width / frame width
+        self._target_error_x = 0.0  # -0.5 .. 0.5 (person center offset)
+        self._target_size_ratio = 0.0  # bbox width / frame width
         self._target_conf = 0.0
-        self._target_box = None       # (x, y, w, h) or None
+        self._target_box = None  # (x, y, w, h) or None
         self._last_person_time = 0.0
         self._last_detect_frame = None  # latest frame with annotations
 
@@ -102,33 +101,48 @@ class PersonFollowerNode(Node):
             history=HistoryPolicy.KEEP_LAST,
         )
         self.sub = self.create_subscription(
-            Image, self.input_topic, self._on_image, input_qos,
+            Image,
+            self.input_topic,
+            self._on_image,
+            input_qos,
             callback_group=sub_group,
         )
         self.cmd_pub = self.create_publisher(Twist, self.cmd_vel_topic, 10)
         self.img_pub = self.create_publisher(
-            Image, self.output_topic,
+            Image,
+            self.output_topic,
             QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE),
         )
 
         # Detection timer: as fast as possible (limited by inference)
         self._detect_timer = self.create_timer(
-            0.05, self._detect_tick, callback_group=detect_group,
+            0.05,
+            self._detect_tick,
+            callback_group=detect_group,
         )
         # Control timer: 20 Hz – smooth velocity commands
         self._control_timer = self.create_timer(
-            1.0 / self.control_hz, self._control_tick, callback_group=control_group,
+            1.0 / self.control_hz,
+            self._control_tick,
+            callback_group=control_group,
         )
         # Video timer: 10 Hz – publish annotated image
         self._video_timer = self.create_timer(
-            1.0 / self.video_hz, self._video_tick, callback_group=video_group,
+            1.0 / self.video_hz,
+            self._video_tick,
+            callback_group=video_group,
         )
 
         self.get_logger().info(
             "Person follower ready: %s -> %s, control=%dHz, smooth=%.2f, speed=%.2f/%.2f"
-            % (self.input_topic, self.cmd_vel_topic,
-               int(self.control_hz), self.smoothing,
-               self.max_linear_speed, self.max_angular_speed)
+            % (
+                self.input_topic,
+                self.cmd_vel_topic,
+                int(self.control_hz),
+                self.smoothing,
+                self.max_linear_speed,
+                self.max_angular_speed,
+            )
         )
 
     # ── Model ──────────────────────────────────────────────────────────
@@ -184,11 +198,17 @@ class PersonFollowerNode(Node):
         inv_scale = 1.0 / scale_factor
         persons_orig = []
         for (bx, by, bw, bh), conf in persons:
-            persons_orig.append((
-                (int(bx * inv_scale), int(by * inv_scale),
-                 int(bw * inv_scale), int(bh * inv_scale)),
-                conf,
-            ))
+            persons_orig.append(
+                (
+                    (
+                        int(bx * inv_scale),
+                        int(by * inv_scale),
+                        int(bw * inv_scale),
+                        int(bh * inv_scale),
+                    ),
+                    conf,
+                )
+            )
 
         if persons_orig:
             best = max(persons_orig, key=lambda p: p[0][2] * p[0][3])
@@ -205,22 +225,41 @@ class PersonFollowerNode(Node):
             # Annotate
             cv2.rectangle(frame, (bx, by), (bx + bw, by + bh), (0, 255, 0), 2)
             label = "FOLLOW %.0f%%" % (conf * 100)
-            cv2.putText(frame, label, (bx, max(by - 8, 16)),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2, cv2.LINE_AA)
+            cv2.putText(
+                frame,
+                label,
+                (bx, max(by - 8, 16)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (0, 255, 0),
+                2,
+                cv2.LINE_AA,
+            )
         else:
             self._target_box = None
             self._target_conf = 0.0
 
         # Draw HUD
-        has_target = self._target_box is not None and (now - self._last_person_time) < self.lost_timeout
-        status = "FOLLOWING" if has_target and self.enabled else (
-            "SEARCHING" if self.enabled else "DISABLED"
+        has_target = (
+            self._target_box is not None and (now - self._last_person_time) < self.lost_timeout
+        )
+        status = (
+            "FOLLOWING"
+            if has_target and self.enabled
+            else ("SEARCHING" if self.enabled else "DISABLED")
         )
         color = (0, 255, 0) if has_target and self.enabled else (0, 140, 255)
-        cv2.putText(frame, status, (10, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2, cv2.LINE_AA)
-        cv2.putText(frame, "v:%.2f w:%.2f" % (self._smooth_vx, self._smooth_wz),
-                    (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1, cv2.LINE_AA)
+        cv2.putText(frame, status, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2, cv2.LINE_AA)
+        cv2.putText(
+            frame,
+            "v:%.2f w:%.2f" % (self._smooth_vx, self._smooth_wz),
+            (10, 60),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            (200, 200, 200),
+            1,
+            cv2.LINE_AA,
+        )
 
         self._last_detect_frame = frame
         self._last_detect_header = msg.header
@@ -250,11 +289,13 @@ class PersonFollowerNode(Node):
             # Linear: drive based on person size in frame
             size_error = self.target_box_ratio - self._target_size_ratio
             if abs(size_error) > 0.03:
-                target_vx = float(np.clip(
-                    size_error * 2.0 * self.max_linear_speed,
-                    -self.max_linear_speed,
-                    self.max_linear_speed,
-                ))
+                target_vx = float(
+                    np.clip(
+                        size_error * 2.0 * self.max_linear_speed,
+                        -self.max_linear_speed,
+                        self.max_linear_speed,
+                    )
+                )
         elif self._last_person_time > 0 and person_age > self.lost_timeout:
             # Lost person – slowly rotate to search
             target_wz = self.search_speed
@@ -287,8 +328,12 @@ class PersonFollowerNode(Node):
     # ── Detection ──────────────────────────────────────────────────────
     def _detect_persons(self, frame: np.ndarray, h: int, w: int) -> List[Tuple[Box, float]]:
         blob = cv2.dnn.blobFromImage(
-            frame, scalefactor=0.007843, size=(300, 300),
-            mean=(127.5, 127.5, 127.5), swapRB=False, crop=False,
+            frame,
+            scalefactor=0.007843,
+            size=(300, 300),
+            mean=(127.5, 127.5, 127.5),
+            swapRB=False,
+            crop=False,
         )
         self.net.setInput(blob)
         output = self.net.forward()

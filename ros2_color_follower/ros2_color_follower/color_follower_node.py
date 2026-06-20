@@ -1,16 +1,16 @@
-import time
 import threading
+import time
 
 import cv2
-from cv_bridge import CvBridge
 import numpy as np
 import rclpy
+from cv_bridge import CvBridge
+from geometry_msgs.msg import Twist
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
+from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import Image
-from geometry_msgs.msg import Twist
 
 
 class ColorFollowerNode(Node):
@@ -55,16 +55,22 @@ class ColorFollowerNode(Node):
         self.input_topic = self.get_parameter("input_topic").value
         self.output_topic = self.get_parameter("output_topic").value
         self.cmd_vel_topic = self.get_parameter("cmd_vel_topic").value
-        self.hsv_low = np.array([
-            self.get_parameter("hsv_low_h").value,
-            self.get_parameter("hsv_low_s").value,
-            self.get_parameter("hsv_low_v").value,
-        ], dtype=np.uint8)
-        self.hsv_high = np.array([
-            self.get_parameter("hsv_high_h").value,
-            self.get_parameter("hsv_high_s").value,
-            self.get_parameter("hsv_high_v").value,
-        ], dtype=np.uint8)
+        self.hsv_low = np.array(
+            [
+                self.get_parameter("hsv_low_h").value,
+                self.get_parameter("hsv_low_s").value,
+                self.get_parameter("hsv_low_v").value,
+            ],
+            dtype=np.uint8,
+        )
+        self.hsv_high = np.array(
+            [
+                self.get_parameter("hsv_high_h").value,
+                self.get_parameter("hsv_high_s").value,
+                self.get_parameter("hsv_high_v").value,
+            ],
+            dtype=np.uint8,
+        )
         self.min_area = int(self.get_parameter("min_area").value)
         self.min_circularity = float(self.get_parameter("min_circularity").value)
         self.max_linear_speed = float(self.get_parameter("max_linear_speed").value)
@@ -86,11 +92,11 @@ class ColorFollowerNode(Node):
         self._detect_lock = threading.Lock()
 
         # CamShift tracking state
-        self._track_window = None   # (x, y, w, h) in downscaled coords
-        self._track_hist = None     # Hue histogram for back-projection
-        self._track_scale = 1.0     # downscale factor
-        self._camshift_fails = 0    # consecutive CamShift failures
-        self._verify_counter = 0    # frames since last HSV re-verification
+        self._track_window = None  # (x, y, w, h) in downscaled coords
+        self._track_hist = None  # Hue histogram for back-projection
+        self._track_scale = 1.0  # downscale factor
+        self._camshift_fails = 0  # consecutive CamShift failures
+        self._verify_counter = 0  # frames since last HSV re-verification
         self._VERIFY_INTERVAL = 15  # re-verify with HSV every N frames
         self._MAX_CAMSHIFT_FAILS = 5
 
@@ -124,23 +130,33 @@ class ColorFollowerNode(Node):
             history=HistoryPolicy.KEEP_LAST,
         )
         self.sub = self.create_subscription(
-            Image, self.input_topic, self._on_image, input_qos,
+            Image,
+            self.input_topic,
+            self._on_image,
+            input_qos,
             callback_group=sub_group,
         )
         self.cmd_pub = self.create_publisher(Twist, self.cmd_vel_topic, 10)
         self.img_pub = self.create_publisher(
-            Image, self.output_topic,
+            Image,
+            self.output_topic,
             QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE),
         )
 
         self._detect_timer = self.create_timer(
-            0.03, self._detect_tick, callback_group=detect_group,
+            0.03,
+            self._detect_tick,
+            callback_group=detect_group,
         )
         self._control_timer = self.create_timer(
-            1.0 / self.control_hz, self._control_tick, callback_group=control_group,
+            1.0 / self.control_hz,
+            self._control_tick,
+            callback_group=control_group,
         )
         self._video_timer = self.create_timer(
-            1.0 / self.video_hz, self._video_tick, callback_group=video_group,
+            1.0 / self.video_hz,
+            self._video_tick,
+            callback_group=video_group,
         )
 
         self.get_logger().info(
@@ -266,22 +282,39 @@ class ColorFollowerNode(Node):
 
             cv2.circle(frame, center, radius_px, (0, 255, 0), 2)
             cv2.circle(frame, center, 4, (0, 255, 0), -1)
-            cv2.putText(frame, method, (center[0] + radius_px + 5, center[1]),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1, cv2.LINE_AA)
+            cv2.putText(
+                frame,
+                method,
+                (center[0] + radius_px + 5, center[1]),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (0, 255, 0),
+                1,
+                cv2.LINE_AA,
+            )
         else:
             self._target_found = False
 
         # HUD
         age = now - self._last_seen_time if self._last_seen_time > 0 else 999
         tracking = self._target_found and age < self.lost_timeout
-        status = "TRACKING" if tracking and self.enabled else (
-            "LOST" if self.enabled else "DISABLED"
+        status = (
+            "TRACKING" if tracking and self.enabled else ("LOST" if self.enabled else "DISABLED")
         )
         hud_color = (0, 255, 0) if tracking and self.enabled else (0, 100, 255)
-        cv2.putText(frame, status, (10, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, hud_color, 2, cv2.LINE_AA)
-        cv2.putText(frame, "vx:%.2f vy:%.2f w:%.2f" % (self._smooth_vx, self._smooth_vy, self._smooth_wz),
-                    (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1, cv2.LINE_AA)
+        cv2.putText(
+            frame, status, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, hud_color, 2, cv2.LINE_AA
+        )
+        cv2.putText(
+            frame,
+            "vx:%.2f vy:%.2f w:%.2f" % (self._smooth_vx, self._smooth_vy, self._smooth_wz),
+            (10, 60),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            (200, 200, 200),
+            1,
+            cv2.LINE_AA,
+        )
 
         self._last_frame = frame
         self._last_header = msg.header
@@ -376,11 +409,14 @@ class ColorFollowerNode(Node):
             if abs(size_error) > 0.02:
                 # Quadratic response: faster when ball is far, gentle when close
                 sign = 1.0 if size_error > 0 else -1.0
-                target_vx = float(np.clip(
-                    sign * (size_error ** 2) * 30.0 * self.max_linear_speed + size_error * 1.5 * self.max_linear_speed,
-                    -self.max_linear_speed,
-                    self.max_linear_speed,
-                ))
+                target_vx = float(
+                    np.clip(
+                        sign * (size_error**2) * 30.0 * self.max_linear_speed
+                        + size_error * 1.5 * self.max_linear_speed,
+                        -self.max_linear_speed,
+                        self.max_linear_speed,
+                    )
+                )
         # No search rotation – just stop when lost
 
         # Exponential smoothing

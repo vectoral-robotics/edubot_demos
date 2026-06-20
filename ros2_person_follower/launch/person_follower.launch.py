@@ -10,8 +10,12 @@ def generate_launch_description():
             DeclareLaunchArgument("input_topic", default_value="/image"),
             DeclareLaunchArgument("output_topic", default_value="/follower/image"),
             DeclareLaunchArgument("cmd_vel_topic", default_value="/cmd_vel"),
-            DeclareLaunchArgument("model_path", default_value="/workspace/models/mobilenet_iter_73000.caffemodel"),
-            DeclareLaunchArgument("config_path", default_value="/workspace/models/mobilenet_ssd.prototxt"),
+            DeclareLaunchArgument(
+                "model_path", default_value="/workspace/models/mobilenet_iter_73000.caffemodel"
+            ),
+            DeclareLaunchArgument(
+                "config_path", default_value="/workspace/models/mobilenet_ssd.prototxt"
+            ),
             DeclareLaunchArgument("confidence_threshold", default_value="0.40"),
             DeclareLaunchArgument("max_linear_speed", default_value="0.3"),
             DeclareLaunchArgument("max_angular_speed", default_value="0.8"),

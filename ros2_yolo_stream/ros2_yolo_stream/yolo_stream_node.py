@@ -1,20 +1,18 @@
 import os
+import threading
 import time
 from typing import List, Sequence, Tuple
 
 import cv2
-from cv_bridge import CvBridge
 import numpy as np
-import threading
-
 import rclpy
 from ament_index_python.packages import get_package_share_directory
+from cv_bridge import CvBridge
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, qos_profile_sensor_data
+from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import Image
-
 
 Box = Tuple[int, int, int, int]
 
@@ -51,7 +49,9 @@ class YoloStreamNode(Node):
         self.max_processing_fps = max(0.1, float(self.get_parameter("max_processing_fps").value))
         self.output_fps = max(0.1, float(self.get_parameter("output_fps").value))
         self.output_reliability = str(self.get_parameter("output_reliability").value).lower()
-        self.watchdog_timeout_sec = max(1.0, float(self.get_parameter("watchdog_timeout_sec").value))
+        self.watchdog_timeout_sec = max(
+            1.0, float(self.get_parameter("watchdog_timeout_sec").value)
+        )
 
         self.bridge = CvBridge()
         self.class_names = self._load_class_names(self.class_names_path)
@@ -340,7 +340,9 @@ class YoloStreamNode(Node):
             rows = rows.T
         return rows
 
-    def _letterbox(self, frame: np.ndarray, target_size: int) -> Tuple[np.ndarray, float, int, int]:
+    def _letterbox(
+        self, frame: np.ndarray, target_size: int
+    ) -> Tuple[np.ndarray, float, int, int]:
         height, width = frame.shape[:2]
         scale = min(target_size / width, target_size / height)
         resized_width = int(round(width * scale))
@@ -348,7 +350,9 @@ class YoloStreamNode(Node):
         pad_x = (target_size - resized_width) // 2
         pad_y = (target_size - resized_height) // 2
 
-        resized = cv2.resize(frame, (resized_width, resized_height), interpolation=cv2.INTER_LINEAR)
+        resized = cv2.resize(
+            frame, (resized_width, resized_height), interpolation=cv2.INTER_LINEAR
+        )
         canvas = np.full((target_size, target_size, 3), 114, dtype=np.uint8)
         canvas[pad_y : pad_y + resized_height, pad_x : pad_x + resized_width] = resized
         return canvas, scale, pad_x, pad_y
@@ -361,7 +365,9 @@ class YoloStreamNode(Node):
         annotated = frame.copy()
         for box, confidence, class_id in detections:
             x, y, w, h = box
-            label = self.class_names[class_id] if class_id < len(self.class_names) else str(class_id)
+            label = (
+                self.class_names[class_id] if class_id < len(self.class_names) else str(class_id)
+            )
             text = "%s %.2f" % (label, confidence)
 
             cv2.rectangle(annotated, (x, y), (x + w, y + h), (0, 220, 0), 2)
