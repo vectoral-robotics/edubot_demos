@@ -4,8 +4,9 @@
   <version>0.0.1</version>
   <description>ROS 2 person following demo using MobileNet-SSD detection and differential drive.</description>
 
-  <maintainer email="dev@siegler.one">Stefan Siegler</maintainer>
-  <license>Apache-2.0</license>
+  <maintainer email="info@vectoral.ch">Vectoral</maintainer>
+  <author>Stefan Siegler</author>
+  <license file="LICENSE">PolyForm-Perimeter-1.0.0</license>
 
   <buildtool_depend>ament_python</buildtool_depend>
 

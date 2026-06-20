@@ -18,10 +18,10 @@ setup(
     ],
     install_requires=["setuptools"],
     zip_safe=True,
-    maintainer="Stefan Siegler",
-    maintainer_email="dev@siegler.one",
+    maintainer="Vectoral",
+    maintainer_email="info@vectoral.ch",
     description="Lightweight ROS 2 camera stream object detection demo using OpenCV DNN and YOLO ONNX.",
-    license="Apache-2.0",
+    license="PolyForm-Perimeter-1.0.0",
     tests_require=["pytest"],
     entry_points={
         "console_scripts": [

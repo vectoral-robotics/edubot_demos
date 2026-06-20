@@ -16,10 +16,10 @@ setup(
     ],
     install_requires=["setuptools"],
     zip_safe=True,
-    maintainer="Stefan Siegler",
-    maintainer_email="dev@siegler.one",
+    maintainer="Vectoral",
+    maintainer_email="info@vectoral.ch",
     description="ROS 2 person following demo using MobileNet-SSD detection and differential drive.",
-    license="Apache-2.0",
+    license="PolyForm-Perimeter-1.0.0",
     tests_require=["pytest"],
     entry_points={
         "console_scripts": [
