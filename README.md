@@ -1,4 +1,4 @@
-# OmniBot Demos
+# EduBot Demos
 
 This folder contains versioned demo templates.
 
