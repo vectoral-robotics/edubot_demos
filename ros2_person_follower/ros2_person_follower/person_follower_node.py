@@ -1,7 +1,6 @@
 import os
 import threading
 import time
-from typing import List, Tuple
 
 import cv2
 import numpy as np
@@ -14,7 +13,9 @@ from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import Image
 
-Box = Tuple[int, int, int, int]  # x, y, w, h
+from .control import compute_target_velocity, exponential_smooth
+
+Box = tuple[int, int, int, int]  # x, y, w, h
 
 
 class PersonFollowerNode(Node):
@@ -120,13 +121,13 @@ class PersonFollowerNode(Node):
             self._detect_tick,
             callback_group=detect_group,
         )
-        # Control timer: 20 Hz – smooth velocity commands
+        # Control timer: 20 Hz - smooth velocity commands
         self._control_timer = self.create_timer(
             1.0 / self.control_hz,
             self._control_tick,
             callback_group=control_group,
         )
-        # Video timer: 10 Hz – publish annotated image
+        # Video timer: 10 Hz - publish annotated image
         self._video_timer = self.create_timer(
             1.0 / self.video_hz,
             self._video_tick,
@@ -134,23 +135,17 @@ class PersonFollowerNode(Node):
         )
 
         self.get_logger().info(
-            "Person follower ready: %s -> %s, control=%dHz, smooth=%.2f, speed=%.2f/%.2f"
-            % (
-                self.input_topic,
-                self.cmd_vel_topic,
-                int(self.control_hz),
-                self.smoothing,
-                self.max_linear_speed,
-                self.max_angular_speed,
-            )
+            f"Person follower ready: {self.input_topic} -> {self.cmd_vel_topic}, "
+            f"control={int(self.control_hz)}Hz, smooth={self.smoothing:.2f}, "
+            f"speed={self.max_linear_speed:.2f}/{self.max_angular_speed:.2f}"
         )
 
     # ── Model ──────────────────────────────────────────────────────────
     def _load_model(self):
         if not os.path.exists(self.model_path):
-            raise FileNotFoundError("Model not found: %s" % self.model_path)
+            raise FileNotFoundError(f"Model not found: {self.model_path}")
         if not os.path.exists(self.config_path):
-            raise FileNotFoundError("Config not found: %s" % self.config_path)
+            raise FileNotFoundError(f"Config not found: {self.config_path}")
         net = cv2.dnn.readNetFromCaffe(self.config_path, self.model_path)
         net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
         net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
@@ -252,7 +247,7 @@ class PersonFollowerNode(Node):
         cv2.putText(frame, status, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2, cv2.LINE_AA)
         cv2.putText(
             frame,
-            "v:%.2f w:%.2f" % (self._smooth_vx, self._smooth_wz),
+            f"v:{self._smooth_vx:.2f} w:{self._smooth_wz:.2f}",
             (10, 60),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.5,
@@ -281,35 +276,22 @@ class PersonFollowerNode(Node):
         target_wz = 0.0
 
         if has_target:
-            # Angular: steer toward person
-            ex = self._target_error_x
-            if abs(ex) > self.dead_zone:
-                target_wz = -ex * 2.0 * self.max_angular_speed
-
-            # Linear: drive based on person size in frame
-            size_error = self.target_box_ratio - self._target_size_ratio
-            if abs(size_error) > 0.03:
-                target_vx = float(
-                    np.clip(
-                        size_error * 2.0 * self.max_linear_speed,
-                        -self.max_linear_speed,
-                        self.max_linear_speed,
-                    )
-                )
+            target_vx, target_wz = compute_target_velocity(
+                self._target_error_x,
+                self._target_size_ratio,
+                self.target_box_ratio,
+                dead_zone=self.dead_zone,
+                max_linear_speed=self.max_linear_speed,
+                max_angular_speed=self.max_angular_speed,
+            )
         elif self._last_person_time > 0 and person_age > self.lost_timeout:
-            # Lost person – slowly rotate to search
+            # Lost person - slowly rotate to search
             target_wz = self.search_speed
 
-        # Exponential smoothing: smooth = alpha * target + (1-alpha) * prev
+        # Exponential smoothing (snaps tiny residual motion to zero)
         a = self.smoothing
-        self._smooth_vx = a * target_vx + (1.0 - a) * self._smooth_vx
-        self._smooth_wz = a * target_wz + (1.0 - a) * self._smooth_wz
-
-        # Kill tiny residual motion
-        if abs(self._smooth_vx) < 0.01:
-            self._smooth_vx = 0.0
-        if abs(self._smooth_wz) < 0.01:
-            self._smooth_wz = 0.0
+        self._smooth_vx = exponential_smooth(self._smooth_vx, target_vx, a)
+        self._smooth_wz = exponential_smooth(self._smooth_wz, target_wz, a)
 
         twist = Twist()
         twist.linear.x = self._smooth_vx
@@ -326,7 +308,7 @@ class PersonFollowerNode(Node):
         self.img_pub.publish(out_msg)
 
     # ── Detection ──────────────────────────────────────────────────────
-    def _detect_persons(self, frame: np.ndarray, h: int, w: int) -> List[Tuple[Box, float]]:
+    def _detect_persons(self, frame: np.ndarray, h: int, w: int) -> list[tuple[Box, float]]:
         blob = cv2.dnn.blobFromImage(
             frame,
             scalefactor=0.007843,

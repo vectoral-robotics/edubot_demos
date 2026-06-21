@@ -12,6 +12,8 @@ from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import Image
 
+from .control import compute_target_velocity, exponential_smooth
+
 
 class ColorFollowerNode(Node):
     """Follow a colored ball using hybrid HSV detection + CamShift tracking.
@@ -23,7 +25,7 @@ class ColorFollowerNode(Node):
          CamShift adapts to lighting changes automatically.
       4. Periodically re-verify with HSV detection; if CamShift drifts,
          fall back to full HSV re-detection.
-      5. When lost, just stop – no annoying search rotation.
+      5. When lost, just stop - no annoying search rotation.
     """
 
     def __init__(self) -> None:
@@ -159,9 +161,11 @@ class ColorFollowerNode(Node):
             callback_group=video_group,
         )
 
+        lo, hi = self.hsv_low, self.hsv_high
+        mode = "omni" if self.omni else "diff"
         self.get_logger().info(
-            "Color follower ready (hybrid HSV+CamShift): HSV [%d,%d,%d]-[%d,%d,%d], mode=%s"
-            % (*self.hsv_low, *self.hsv_high, "omni" if self.omni else "diff")
+            f"Color follower ready (hybrid HSV+CamShift): "
+            f"HSV [{lo[0]},{lo[1]},{lo[2]}]-[{hi[0]},{hi[1]},{hi[2]}], mode={mode}"
         )
 
     # ── Image callback ─────────────────────────────────────────────────
@@ -249,12 +253,12 @@ class ColorFollowerNode(Node):
                     method = "RE-LOCK"
                     self._camshift_fails = 0
                 elif self._camshift_fails >= self._MAX_CAMSHIFT_FAILS:
-                    # Lost it – reset tracker
+                    # Lost it - reset tracker
                     self._track_hist = None
                     self._track_window = None
                     found = False
         else:
-            # ── No active tracker – full HSV detection to acquire ──────
+            # ── No active tracker - full HSV detection to acquire ──────
             hsv_result = self._hsv_detect(blurred, hsv, proc_w, proc_h)
             if hsv_result is not None:
                 scx, scy, sr, cnt = hsv_result
@@ -307,7 +311,7 @@ class ColorFollowerNode(Node):
         )
         cv2.putText(
             frame,
-            "vx:%.2f vy:%.2f w:%.2f" % (self._smooth_vx, self._smooth_vy, self._smooth_wz),
+            f"vx:{self._smooth_vx:.2f} vy:{self._smooth_vy:.2f} w:{self._smooth_wz:.2f}",
             (10, 60),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.5,
@@ -392,45 +396,22 @@ class ColorFollowerNode(Node):
         target_wz = 0.0
 
         if has_target:
-            ex = self._target_error_x
+            target_vx, target_vy, target_wz = compute_target_velocity(
+                self._target_error_x,
+                self._target_radius_ratio,
+                self.target_radius_ratio,
+                omni=self.omni,
+                dead_zone=self.dead_zone,
+                max_linear_speed=self.max_linear_speed,
+                max_angular_speed=self.max_angular_speed,
+            )
+        # No search rotation - just stop when lost
 
-            if self.omni:
-                # Omnidirectional: strafe sideways + gentle rotation
-                if abs(ex) > self.dead_zone:
-                    target_vy = -ex * 2.0 * self.max_linear_speed
-                    target_wz = -ex * 0.8 * self.max_angular_speed
-            else:
-                # Differential: rotate to center the ball
-                if abs(ex) > self.dead_zone:
-                    target_wz = -ex * 2.0 * self.max_angular_speed
-
-            # Forward/backward: drive based on apparent ball size
-            size_error = self.target_radius_ratio - self._target_radius_ratio
-            if abs(size_error) > 0.02:
-                # Quadratic response: faster when ball is far, gentle when close
-                sign = 1.0 if size_error > 0 else -1.0
-                target_vx = float(
-                    np.clip(
-                        sign * (size_error**2) * 30.0 * self.max_linear_speed
-                        + size_error * 1.5 * self.max_linear_speed,
-                        -self.max_linear_speed,
-                        self.max_linear_speed,
-                    )
-                )
-        # No search rotation – just stop when lost
-
-        # Exponential smoothing
+        # Exponential smoothing (snaps tiny residual motion to zero)
         a = self.smoothing
-        self._smooth_vx = a * target_vx + (1.0 - a) * self._smooth_vx
-        self._smooth_vy = a * target_vy + (1.0 - a) * self._smooth_vy
-        self._smooth_wz = a * target_wz + (1.0 - a) * self._smooth_wz
-
-        if abs(self._smooth_vx) < 0.01:
-            self._smooth_vx = 0.0
-        if abs(self._smooth_vy) < 0.01:
-            self._smooth_vy = 0.0
-        if abs(self._smooth_wz) < 0.01:
-            self._smooth_wz = 0.0
+        self._smooth_vx = exponential_smooth(self._smooth_vx, target_vx, a)
+        self._smooth_vy = exponential_smooth(self._smooth_vy, target_vy, a)
+        self._smooth_wz = exponential_smooth(self._smooth_wz, target_wz, a)
 
         twist = Twist()
         twist.linear.x = self._smooth_vx
