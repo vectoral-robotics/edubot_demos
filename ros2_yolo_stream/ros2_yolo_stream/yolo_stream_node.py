@@ -1,7 +1,7 @@
 import os
 import threading
 import time
-from typing import List, Sequence, Tuple
+from collections.abc import Sequence
 
 import cv2
 import numpy as np
@@ -14,7 +14,7 @@ from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import Image
 
-Box = Tuple[int, int, int, int]
+Box = tuple[int, int, int, int]
 
 
 class YoloStreamNode(Node):
@@ -63,7 +63,7 @@ class YoloStreamNode(Node):
         self.latest_frame_count = 0
         self.last_published_frame_count = 0
         self.last_processed_frame_count = 0
-        self.last_detections: List[Tuple[Box, float, int]] = []
+        self.last_detections: list[tuple[Box, float, int]] = []
         self.last_input_time = time.monotonic()
         self.last_publish_time = time.monotonic()
         self.last_log_time = time.monotonic()
@@ -110,37 +110,27 @@ class YoloStreamNode(Node):
         self.watchdog_timer = self.create_timer(1.0, self._watchdog, callback_group=timer_cb_group)
 
         self.get_logger().info(
-            "Detection stream ready: %s -> %s, type=%s, model=%s, output_fps=%.1f, max_processing_fps=%.1f, output_reliability=%s"
-            % (
-                self.input_topic,
-                self.output_topic,
-                self.model_type,
-                self.model_path,
-                self.output_fps,
-                self.max_processing_fps,
-                self.output_reliability,
-            )
+            f"Detection stream ready: {self.input_topic} -> {self.output_topic}, type={self.model_type}, model={self.model_path}, output_fps={self.output_fps:.1f}, max_processing_fps={self.max_processing_fps:.1f}, output_reliability={self.output_reliability}"
         )
 
     def _default_class_names_path(self) -> str:
         share_dir = get_package_share_directory("ros2_yolo_stream")
         return os.path.join(share_dir, "config", "voc.names")
 
-    def _load_class_names(self, path: str) -> List[str]:
-        with open(path, "r", encoding="utf-8") as names_file:
+    def _load_class_names(self, path: str) -> list[str]:
+        with open(path, encoding="utf-8") as names_file:
             return [line.strip() for line in names_file if line.strip()]
 
     def _load_model(self, path: str):
         if not os.path.exists(path):
             raise FileNotFoundError(
-                "Detection model not found at %s. Run the matching download script first." % path
+                f"Detection model not found at {path}. Run the matching download script first."
             )
 
         if self.model_type == "ssd":
             if not os.path.exists(self.config_path):
                 raise FileNotFoundError(
-                    "SSD config not found at %s. Run scripts/download_mobilenet_ssd.sh first."
-                    % self.config_path
+                    f"SSD config not found at {self.config_path}. Run scripts/download_mobilenet_ssd.sh first."
                 )
             net = cv2.dnn.readNetFromCaffe(self.config_path, path)
         else:
@@ -198,7 +188,7 @@ class YoloStreamNode(Node):
         except cv2.error as exc:
             detections = []
             if not self.inference_error_logged:
-                self.get_logger().error("OpenCV DNN inference failed: %s" % exc)
+                self.get_logger().error(f"OpenCV DNN inference failed: {exc}")
                 self.inference_error_logged = True
 
         self.processed_count += 1
@@ -206,14 +196,9 @@ class YoloStreamNode(Node):
         if now - self.last_log_time > 10.0:
             elapsed_ms = (now - start) * 1000.0
             self.get_logger().info(
-                "Received %d frames, published %d, processed %d, last inference %.1f ms, detections=%d"
-                % (
-                    self.frame_count,
-                    self.published_count,
-                    self.processed_count,
-                    elapsed_ms,
-                    len(detections),
-                )
+                f"Received {self.frame_count} frames, published {self.published_count}, "
+                f"processed {self.processed_count}, last inference {elapsed_ms:.1f} ms, "
+                f"detections={len(detections)}"
             )
             self.last_log_time = now
 
@@ -227,23 +212,18 @@ class YoloStreamNode(Node):
             return
 
         self.get_logger().warn(
-            "Watchdog: no input for %.1fs, no output for %.1fs, received=%d, published=%d, processed=%d"
-            % (
-                no_input_for,
-                no_publish_for,
-                self.frame_count,
-                self.published_count,
-                self.processed_count,
-            )
+            f"Watchdog: no input for {no_input_for:.1f}s, no output for {no_publish_for:.1f}s, "
+            f"received={self.frame_count}, published={self.published_count}, "
+            f"processed={self.processed_count}"
         )
         self.last_watchdog_log_time = now
 
-    def _detect(self, frame: np.ndarray) -> List[Tuple[Box, float, int]]:
+    def _detect(self, frame: np.ndarray) -> list[tuple[Box, float, int]]:
         if self.model_type == "ssd":
             return self._detect_ssd(frame)
         return self._detect_yolo(frame)
 
-    def _detect_ssd(self, frame: np.ndarray) -> List[Tuple[Box, float, int]]:
+    def _detect_ssd(self, frame: np.ndarray) -> list[tuple[Box, float, int]]:
         height, width = frame.shape[:2]
         blob = cv2.dnn.blobFromImage(
             frame,
@@ -257,7 +237,7 @@ class YoloStreamNode(Node):
         self.net.setInput(blob)
         output = self.net.forward()
 
-        detections: List[Tuple[Box, float, int]] = []
+        detections: list[tuple[Box, float, int]] = []
         for index in range(output.shape[2]):
             confidence = float(output[0, 0, index, 2])
             if confidence < self.confidence_threshold:
@@ -272,7 +252,7 @@ class YoloStreamNode(Node):
 
         return detections
 
-    def _detect_yolo(self, frame: np.ndarray) -> List[Tuple[Box, float, int]]:
+    def _detect_yolo(self, frame: np.ndarray) -> list[tuple[Box, float, int]]:
         input_image, scale, pad_x, pad_y = self._letterbox(frame, self.input_size)
         blob = cv2.dnn.blobFromImage(
             input_image,
@@ -287,9 +267,9 @@ class YoloStreamNode(Node):
         output = self.net.forward()
         rows = self._normalize_output(output)
 
-        boxes: List[Box] = []
-        confidences: List[float] = []
-        class_ids: List[int] = []
+        boxes: list[Box] = []
+        confidences: list[float] = []
+        class_ids: list[int] = []
         height, width = frame.shape[:2]
 
         for row in rows:
@@ -309,10 +289,10 @@ class YoloStreamNode(Node):
             w = float(box_width) / scale
             h = float(box_height) / scale
 
-            x1 = max(0, min(width - 1, int(round(x))))
-            y1 = max(0, min(height - 1, int(round(y))))
-            x2 = max(0, min(width - 1, int(round(x + w))))
-            y2 = max(0, min(height - 1, int(round(y + h))))
+            x1 = max(0, min(width - 1, round(x)))
+            y1 = max(0, min(height - 1, round(y)))
+            x2 = max(0, min(width - 1, round(x + w)))
+            y2 = max(0, min(height - 1, round(y + h)))
             clipped_w = max(1, x2 - x1)
             clipped_h = max(1, y2 - y1)
 
@@ -327,7 +307,7 @@ class YoloStreamNode(Node):
             self.nms_threshold,
         )
 
-        detections: List[Tuple[Box, float, int]] = []
+        detections: list[tuple[Box, float, int]] = []
         for index in self._flatten_indices(selected):
             detections.append((boxes[index], confidences[index], class_ids[index]))
         return detections
@@ -342,11 +322,11 @@ class YoloStreamNode(Node):
 
     def _letterbox(
         self, frame: np.ndarray, target_size: int
-    ) -> Tuple[np.ndarray, float, int, int]:
+    ) -> tuple[np.ndarray, float, int, int]:
         height, width = frame.shape[:2]
         scale = min(target_size / width, target_size / height)
-        resized_width = int(round(width * scale))
-        resized_height = int(round(height * scale))
+        resized_width = round(width * scale)
+        resized_height = round(height * scale)
         pad_x = (target_size - resized_width) // 2
         pad_y = (target_size - resized_height) // 2
 
@@ -360,7 +340,7 @@ class YoloStreamNode(Node):
     def _draw_detections(
         self,
         frame: np.ndarray,
-        detections: Sequence[Tuple[Box, float, int]],
+        detections: Sequence[tuple[Box, float, int]],
     ) -> np.ndarray:
         annotated = frame.copy()
         for box, confidence, class_id in detections:
@@ -368,7 +348,7 @@ class YoloStreamNode(Node):
             label = (
                 self.class_names[class_id] if class_id < len(self.class_names) else str(class_id)
             )
-            text = "%s %.2f" % (label, confidence)
+            text = f"{label} {confidence:.2f}"
 
             cv2.rectangle(annotated, (x, y), (x + w, y + h), (0, 220, 0), 2)
             text_size, _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
@@ -408,7 +388,7 @@ class YoloStreamNode(Node):
         )
         return annotated
 
-    def _flatten_indices(self, indices) -> List[int]:
+    def _flatten_indices(self, indices) -> list[int]:
         if indices is None or len(indices) == 0:
             return []
         return [int(index) for index in np.array(indices).reshape(-1)]
