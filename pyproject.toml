@@ -1,0 +1,61 @@
+# edubot_demos — Python tooling configuration.
+#
+# This repo bundles three independent ament_python demo packages
+# (ros2_color_follower, ros2_person_follower, ros2_yolo_stream). The ROS build
+# is driven by each package's setup.py; this file holds the shared developer
+# tooling (ruff, pytest+coverage, commitizen) and the uv-managed dev env.
+# uv treats this as a non-package project so it never conflicts with the builds.
+
+# --- uv: dev environment ---------------------------------------------------
+[tool.uv]
+package = false
+
+[dependency-groups]
+dev = [
+    "ruff==0.12.0",
+    "pytest>=8",
+    "pytest-cov>=5",
+    "commitizen>=3.29",
+    "pre-commit>=3.8",
+]
+
+# --- ruff: lint + format ---------------------------------------------------
+[tool.ruff]
+line-length = 99
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+ignore = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+# --- pytest + coverage -----------------------------------------------------
+[tool.pytest.ini_options]
+# Each package dir is added to sys.path so `import <pkg>.control` resolves
+# without installing the packages.
+pythonpath = ["ros2_color_follower", "ros2_person_follower", "ros2_yolo_stream"]
+testpaths = ["ros2_color_follower/test", "ros2_person_follower/test"]
+# Coverage is opt-in (kept out of addopts) so bare `pytest` / `colcon test` on
+# the robot works without pytest-cov. Ask for it explicitly:
+#   uv run pytest --cov=ros2_color_follower.control --cov=ros2_person_follower.control
+
+[tool.coverage.report]
+show_missing = true
+
+# --- commitizen: conventional commits + versioning + changelog -------------
+[tool.commitizen]
+name = "cz_conventional_commits"
+version = "0.0.1"
+tag_format = "v$version"
+major_version_zero = true
+update_changelog_on_bump = true
+version_files = [
+    "ros2_color_follower/setup.py:version",
+    "ros2_color_follower/package.xml:version",
+    "ros2_person_follower/setup.py:version",
+    "ros2_person_follower/package.xml:version",
+    "ros2_yolo_stream/setup.py:version",
+    "ros2_yolo_stream/package.xml:version",
+]
